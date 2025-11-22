@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       binvern:
-        description: '指定Zig版本号(如0.15.2,不填则使用最新版本)'
+        description: '指定Helm版本号(如3.19.2,不填则使用最新版本)'
         required: false
         type: string
   #schedule:
@@ -59,7 +59,7 @@ jobs:
           tag_name: "v${{ env.VNSTR }}"  # 用版本号作为tag(如v0.12.0)
           name: "Zig v${{ env.VNSTR }} Binaries"
           body: |
-            自动同步自Zig官网的二进制程序
+            自动同步自Helm官网的二进制程序
             - 版本: ${{ env.VNSTR }}
             - 官网下载地址: ${{ env.BSURL }}/${{ env.VNSTR }}
           overwrite_files: true  # 不覆盖已有版本(避免重复发布同一版本)
