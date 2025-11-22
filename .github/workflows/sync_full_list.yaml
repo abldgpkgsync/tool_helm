@@ -24,29 +24,33 @@ jobs:
         id: get_files
         run: |
           get_files_and_export_envs() {
-            URL="https://ziglang.org/download/index.json"
+            OWN="helm/helm"
+            URL="https://api.github.com/repos/${OWN}/releases"
             TJN="tmp.json" && [ ! -e ${TJN} ] && curl -fsLo ${TJN} ${URL}
-            patxx= pat_sed='s#^\s+"tarball": "(https?://.*)",?$#\1#p'
-            vnstr=${{ github.event.inputs.binvern }}
-            if [ X0 != X${#vnstr} ]; then
-              patxx='."'${vnstr}'"'
-            else
-              patxx='.master' && vnstr=$(jq -r "${patxx}.version" <${TJN})
+            FLT='.[]|select(.tag_name|test("-(rc|beta|al)")|not)|.tag_name'
+            LST=($(jq -r "${FLT}" <${TJN}))
+            VNS=${LST}
+            if [ X0 != X${#1} ]; then
+              VNS=$(echo ${LST[@]} | sed -r 's, ,\n,g' | grep -Em1 "^v.*${1#v}")
             fi
-            set -- $(jq -r "${patxx}" <${TJN} | sed -r -n "${pat_sed}")
-            echo "使用的版本号: ${vnstr}" #&& rm -f ${TJN}
+            echo "使用的版本号: ${VNS}"
+            FLT2='.[]|select(.tag_name|test("^'${VNS}'$"))'
+            FLT2+='|.assets[]|select(.name|test(".sha256.asc$"))|.name'
+            set -- $(jq -r "${FLT2}" <${TJN}) && mkdir dist 2>/dev/null
             ##fetch-and-appendto-list
-            xf= && mkdir dist && for xf in $@; do
-              printf "\n#[TIP] Now downloading [${xf}]...\n"
-              curl -fLo dist/${xf##*/} ${xf}
-            done
-
+            xf= && for xf in $(jq -r "${FLT2}" <${TJN}); do
+              set -- ${xf%.asc} && set -- dist/$1 https://get.helm.sh/$1
+              printf "\n#[TIP] Now downloading [$2]...\n" && curl -4Lfo $1 $2
+              set -- ${xf%.sha256.asc} && set -- dist/$1 https://get.helm.sh/$1
+              printf "#[TIP] Now downloading [$2]...\n" && curl -4Lfo $1 $2
+            done 2>/dev/null
             ##追加到环境变量中
-            echo "VNSTR=${vnstr}" >>${GITHUB_ENV}
+            echo "VNS=${VNS}" >>${GITHUB_ENV}
             echo "BSURL=${URL%/index.json}" >>${GITHUB_ENV}
           }
           ##
-          get_files_and_export_envs
+          get_files_and_export_envs ${{ github.event.inputs.binvern }}
+
 
       - name: 发布到Releases
         uses: softprops/action-gh-release@v2
