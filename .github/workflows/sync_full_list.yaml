@@ -20,7 +20,7 @@ jobs:
       - name: 拉取仓库代码
         uses: actions/checkout@v4
 
-      - name: 下载Zig指定版本的全部二进制包
+      - name: 下载Helm指定版本的全部二进制包
         id: get_files
         run: |
           get_files_and_export_envs() {
@@ -45,21 +45,20 @@ jobs:
               printf "#[TIP] Now downloading [$2]...\n" && curl -4Lfo $1 $2
             done 2>/dev/null
             ##追加到环境变量中
-            echo "VNS=${VNS}" >>${GITHUB_ENV}
+            echo "VNSTR=${VNS}" >>${GITHUB_ENV}
             echo "BSURL=${URL%/index.json}" >>${GITHUB_ENV}
           }
           ##
           get_files_and_export_envs ${{ github.event.inputs.binvern }}
 
-
       - name: 发布到Releases
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          tag_name: "v${{ env.VNSTR }}"  # 用版本号作为tag(如v0.12.0)
-          name: "Zig v${{ env.VNSTR }} Binaries"
+          tag_name: "v${{ env.VNSTR }}"  # 用版本号作为tag(如v3.19.2)
+          name: "Helm v${{ env.VNSTR }} Binaries"
           body: |
-            自动同步自Helm官网的二进制程序
+            手动同步自Helm官网的二进制程序
             - 版本: ${{ env.VNSTR }}
             - 官网下载地址: ${{ env.BSURL }}/${{ env.VNSTR }}
           overwrite_files: true  # 不覆盖已有版本(避免重复发布同一版本)

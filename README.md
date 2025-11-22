@@ -1,3 +1,3 @@
-# lang_zig
+# tool_helm
 
-ziglang binaries sync from https://ziglang.org/download/index.json
+helm binaries sync from https://get.helm.sh/
