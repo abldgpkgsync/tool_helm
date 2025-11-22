@@ -47,7 +47,7 @@ jobs:
             done #2>/dev/null
             ##追加到环境变量中
             echo "VNSTR=${VNS}" >>${GITHUB_ENV}
-            echo "BSURL=${URL%/index.json}" >>${GITHUB_ENV}
+            echo "BSURL=https://get.helm.sh/a_pkg_file_name" >>${GITHUB_ENV}
           }
           ##
           get_files_and_export_envs ${{ github.event.inputs.binvern }}
@@ -56,8 +56,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          tag_name: "v${{ env.VNSTR }}"  # 用版本号作为tag(如v3.19.2)
-          name: "Helm v${{ env.VNSTR }} Binaries"
+          tag_name: "${{ env.VNSTR }}"  # 用版本号作为tag(如v3.19.2)
+          name: "Helm ${{ env.VNSTR }} Binaries"
           body: |
             手动同步自Helm官网的二进制程序
             - 版本: ${{ env.VNSTR }}
