@@ -43,7 +43,7 @@ jobs:
               printf "\n#[TIP] Now downloading [$2]...\n" && curl -4Lfo $1 $2
               set -- ${xf%.sha256.asc} && set -- dist/$1 https://get.helm.sh/$1
               printf "#[TIP] Now downloading [$2]...\n" && curl -4Lfo $1 $2
-            done 2>/dev/null
+            done #2>/dev/null
             ##追加到环境变量中
             echo "VNSTR=${VNS}" >>${GITHUB_ENV}
             echo "BSURL=${URL%/index.json}" >>${GITHUB_ENV}
