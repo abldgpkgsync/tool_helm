@@ -61,5 +61,5 @@ jobs:
           body: |
             手动同步自Helm官网的二进制程序
             - 版本: ${{ env.VNSTR }}
-            - 官网下载地址: ${{ env.BSURL }}/${{ env.VNSTR }}
+            - 官网下载地址: ${{ env.BSURL }}
           overwrite_files: true  # 不覆盖已有版本(避免重复发布同一版本)
