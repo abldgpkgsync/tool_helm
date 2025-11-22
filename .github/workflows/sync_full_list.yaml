@@ -39,8 +39,9 @@ jobs:
             set -- $(jq -r "${FLT2}" <${TJN}) && mkdir dist 2>/dev/null
             ##fetch-and-appendto-list
             xf= && for xf in $(jq -r "${FLT2}" <${TJN}); do
-              set -- ${xf%.asc} && set -- dist/$1 https://get.helm.sh/$1
-              printf "\n#[TIP] Now downloading [$2]...\n" && curl -4Lfo $1 $2
+              [[ X${xf}Z = X*loong*Z ]] && continue
+              #set -- ${xf%.asc} && set -- dist/$1 https://get.helm.sh/$1
+              #printf "\n#[TIP] Now downloading [$2]...\n" && curl -4Lfo $1 $2
               set -- ${xf%.sha256.asc} && set -- dist/$1 https://get.helm.sh/$1
               printf "#[TIP] Now downloading [$2]...\n" && curl -4Lfo $1 $2
             done #2>/dev/null
