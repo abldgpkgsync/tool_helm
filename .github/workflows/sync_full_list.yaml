@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       binvern:
-        description: '指定Helm版本号(如3.19.2,不填则使用最新版本)'
+        description: '指定 Helm 版本号(如 3.19.2 或 v3.19.2,不填则使用最新稳定版)'
         required: false
         type: string
   #schedule:
@@ -13,53 +13,114 @@ on:
 permissions:
   contents: write
 
+# 并发控制:同一时间只允许一个同步任务运行,避免重复发布冲突
+concurrency:
+  group: full-sync
+  cancel-in-progress: false
+
+env:
+  DOWNLOAD_JOBS: 8          # 并行下载数
+  OWN: helm/helm
+  API: https://api.github.com/repos/helm/helm/releases
+
 jobs:
   sync_binaries:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: 拉取仓库代码
         uses: actions/checkout@v4
 
-      - name: 下载Helm指定版本的全部二进制包
-        id: get_files
+      - name: 解析版本并生成下载清单
+        id: plan
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # 带鉴权,避免 API 限流(60次/小时 -> 5000次/小时)
+          WANT: ${{ inputs.binvern }}
         run: |
-          get_files_and_export_envs() {
-            OWN="helm/helm"
-            URL="https://api.github.com/repos/${OWN}/releases"
-            TJN="tmp.json" && [ ! -e ${TJN} ] && curl -fsLo ${TJN} ${URL}
-            FLT='.[]|select(.tag_name|test("-(rc|beta|al)")|not)|.tag_name'
-            LST=($(jq -r "${FLT}" <${TJN}))
-            VNS=${LST}
-            if [ X0 != X${#1} ]; then
-              VNS=$(echo ${LST[@]} | sed -r 's, ,\n,g' | grep -Em1 "^v.*${1#v}")
-            fi
-            echo "使用的版本号: ${VNS}"
-            FLT2='.[]|select(.tag_name|test("^'${VNS}'$"))'
-            FLT2+='|.assets[]|select(.name|test(".sha256.asc$"))|.name'
-            set -- $(jq -r "${FLT2}" <${TJN}) && mkdir dist 2>/dev/null
-            ##fetch-and-appendto-list
-            xf= && for xf in $(jq -r "${FLT2}" <${TJN}); do
-              [[ X${xf}Z = X*loong*Z ]] && continue
-              #set -- ${xf%.asc} && set -- dist/$1 https://get.helm.sh/$1
-              #printf "\n#[TIP] Now downloading [$2]...\n" && curl -4Lfo $1 $2
-              set -- ${xf%.sha256.asc} && set -- dist/$1 https://get.helm.sh/$1
-              printf "#[TIP] Now downloading [$2]...\n" && curl -4Lfo $1 $2
-            done #2>/dev/null
-            ##追加到环境变量中
-            echo "VNSTR=${VNS}" >>${GITHUB_ENV}
-            echo "BSURL=https://get.helm.sh/a_pkg_file_name" >>${GITHUB_ENV}
-          }
-          ##
-          get_files_and_export_envs ${{ github.event.inputs.binvern }}
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json")
 
-      - name: 发布到Releases
+          # 1. 确定目标版本:指定版本用 tags 接口精确命中,未指定用 latest
+          if [[ -n "${WANT:-}" ]]; then
+            tag="v${WANT#v}"
+            curl -fsSL --retry 3 --retry-delay 2 "${auth[@]}" "${API}/tags/${tag}" -o rel.json
+          else
+            curl -fsSL --retry 3 --retry-delay 2 "${auth[@]}" "${API}/latest" -o rel.json
+          fi
+          VN=$(jq -r '.tag_name' rel.json)
+
+          # 最新版可能是预发布,兜底跳过 rc/beta/alpha
+          if [[ "${VN}" =~ -(rc|beta|alpha) ]]; then
+            echo "::error::解析到预发布版本 ${VN},请显式指定稳定版本号"
+            exit 1
+          fi
+
+          # 2. 生成下载清单:以 .sha256.asc 作为文件名来源,去掉后缀即二进制包名
+          jq -r '.assets[].name | select(endswith(".sha256.asc")) | rtrimstr(".sha256.asc")' rel.json \
+            | grep -v 'loong' > "${RUNNER_TEMP}/manifest.txt"
+
+          if [[ ! -s "${RUNNER_TEMP}/manifest.txt" ]]; then
+            echo "::error::未找到任何可下载资源"
+            exit 1
+          fi
+
+          echo "version=${VN}" >> "${GITHUB_OUTPUT}"
+          echo "count=$(wc -l < "${RUNNER_TEMP}/manifest.txt")" >> "${GITHUB_OUTPUT}"
+          echo "base_url=https://get.helm.sh/" >> "${GITHUB_OUTPUT}"
+          echo "解析到版本: ${VN} ($(wc -l < "${RUNNER_TEMP}/manifest.txt") 个资源)"
+
+      - name: 并行下载全部二进制包
+        env:
+          JOBS: ${{ env.DOWNLOAD_JOBS }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          export dist="dist"
+
+          download_one() {
+            local name="$1"
+            for i in 1 2 3; do
+              if curl -4fL --retry 3 --retry-all-errors --retry-delay 2 \
+                    --connect-timeout 15 --max-time 1200 \
+                    -o "${dist}/${name}" "https://get.helm.sh/${name}"; then
+                return 0
+              fi
+              sleep $((i * 3))
+            done
+            echo "::error::下载失败: ${name}"
+            return 1
+          }
+          export -f download_one
+
+          # 并行下载,任一失败即整体失败
+          xargs -a "${RUNNER_TEMP}/manifest.txt" -I{} -P "${JOBS}" \
+            bash -c 'download_one "$@"' _ {}
+          echo "下载完成,文件数: $(find dist -type f | wc -l)"
+
+      - name: 校验 SHA256
+        run: |
+          set -euo pipefail
+          fail=0
+          while read -r name; do
+            sum=$(curl -4fsSL --retry 3 "https://get.helm.sh/${name}.sha256" | awk '{print $1}')
+            actual=$(sha256sum "dist/${name}" | awk '{print $1}')
+            if [[ "${sum}" != "${actual}" ]]; then
+              echo "::error::校验失败: ${name}"
+              fail=1
+            fi
+          done < "${RUNNER_TEMP}/manifest.txt"
+          exit ${fail}
+
+      - name: 发布到 Releases
+        if: steps.plan.outputs.count != '0'
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          tag_name: "${{ env.VNSTR }}"  # 用版本号作为tag(如v3.19.2)
-          name: "Helm ${{ env.VNSTR }} Binaries"
+          tag_name: "${{ steps.plan.outputs.version }}"
+          name: "Helm ${{ steps.plan.outputs.version }} Binaries"
           body: |
-            手动同步自Helm官网的二进制程序
-            - 版本: ${{ env.VNSTR }}
-            - 官网下载地址: ${{ env.BSURL }}
-          overwrite_files: true  # 不覆盖已有版本(避免重复发布同一版本)
+            同步自 Helm 官网的二进制程序
+            - 版本: ${{ steps.plan.outputs.version }}
+            - 官网下载地址: ${{ steps.plan.outputs.base_url }}
+          overwrite_files: true
+          fail_on_unmatched_files: true
