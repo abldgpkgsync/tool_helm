@@ -1,4 +1,4 @@
-name: Full Sync
+name: Do Tools Sync For Abldg
 
 on:
   workflow_dispatch:
@@ -7,8 +7,8 @@ on:
         description: '指定 Helm 版本号(如 3.19.2 或 v3.19.2,不填则使用最新稳定版)'
         required: false
         type: string
-  #schedule:
-  #  - cron: '0 2 * * *'  # 每天凌晨2点自动执行(使用最新版本)
+  schedule:
+    - cron: '0 2 10 * *'  # 每月10号凌晨2点自动执行(使用最新版本)
 
 permissions:
   contents: write
